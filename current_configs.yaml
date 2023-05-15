@@ -1,16 +1,12 @@
 # ======================================= Learning configs ==================================
 n_epoch: 100
-batch_size: 128
+batch_size: 64
 test_batch_size: 16
-lr: 0.0005
+lr: 0.001
 loss_weights: 0.5
-clip_gradient: 0.6
+clip_gradient: 0.8
 start_epoch: 0
 weight_decay: 5e-4
-
-  # ======================================= Print and snapshot configs ==================================
-snapshot_pref: ./Exps/WeaklySupv/Weakly-New-666-4-head-Inter2Head-LR5-20-40-0.5-cp0.5/
-print_freq: 20
+snapshot_pref: ./exp/debug/123
+print_freq: 1
 eval_freq: 1
-
-

@@ -3,7 +3,7 @@ import time
 import random
 import json
 from tqdm import tqdm
-
+import sys
 import torch
 import torch.nn as nn
 from torch.nn.utils import clip_grad_norm_
@@ -54,8 +54,12 @@ def main():
     best_accuracy, best_accuracy_epoch = 0, 0
     # configs
     dataset_configs = get_and_save_args(parser)
+    args = parser.parse_args()
+    
     parser.set_defaults(**dataset_configs)
     args = parser.parse_args()
+    args.test_batch_size = 1
+    print('args.test_batch_size:',args.test_batch_size)
     # select GPUs
     os.environ['CUDA_DEVICE_ORDER'] = "PCI_BUS_ID"
     os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
@@ -76,22 +80,22 @@ def main():
         logger.info(f'\nLog file will be save in a {args.snapshot_pref}/Eval.log.')
 
     '''Dataset'''
-    train_dataloader = DataLoader(
-        AVEDataset('./data/', split='train'),
-        batch_size=args.batch_size,
-        shuffle=True,
-        num_workers=8,
-        pin_memory=True
-    )
+    # train_dataloader = DataLoader(
+    #     AVEDataset('./data/', split='train'),
+    #     batch_size=args.batch_size,
+    #     shuffle=True,
+    #     num_workers=8,
+    #     pin_memory=True
+    # )
 
     test_dataloader = DataLoader(
         AVEDataset('./data/', split='test'),
         batch_size=args.test_batch_size,
         shuffle=False,
-        num_workers=8,
+        num_workers=1,
         pin_memory=True
     )
-
+    
     '''model setting'''
     mainModel = main_model(config['model'])
     mainModel = nn.DataParallel(mainModel).cuda()
@@ -242,59 +246,77 @@ def validate_epoch(model, test_dataloader, criterion, criterion_event, epoch, ev
         # audio_feature = audio_feature.float()
         labels = labels.double().cuda()
         bs = visual_feature.size(0)
+        print("this is visual_feature_dis:",visual_feature.shape)
+        print("this is audio_feature_dis:",audio_feature.shape)
+        print('this is visual_feature_dtype:',visual_feature.dtype )
         is_event_scores, event_scores, audio_visual_gate, _ = model(visual_feature, audio_feature)
+        print("is_event_scores:",is_event_scores.shape)
+        print("event_scores:",event_scores.shape)
+        print("audio_visual_gate:",audio_visual_gate.shape)
+    
         is_event_scores = is_event_scores.transpose(1, 0).squeeze()
         audio_visual_gate = audio_visual_gate.transpose(1, 0).squeeze()
 
-        labels_foreground = labels[:, :, :-1]
-        labels_BCE, labels_evn = labels_foreground.max(-1)
-        labels_event, _ = labels_evn.max(-1)
-        loss_is_event = criterion(is_event_scores, labels_BCE.cuda())
-        loss_is_gate = criterion(audio_visual_gate, labels_BCE.cuda())
-        loss_event_class = criterion_event(event_scores, labels_event.cuda())
-        loss = loss_is_event + loss_event_class + loss_is_gate
+        # labels_foreground = labels[:, :, :-1]
+        # labels_BCE, labels_evn = labels_foreground.max(-1)
+        # labels_event, _ = labels_evn.max(-1)
+        # loss_is_event = criterion(is_event_scores, labels_BCE.cuda())
+        # loss_is_gate = criterion(audio_visual_gate, labels_BCE.cuda())
+        # loss_event_class = criterion_event(event_scores, labels_event.cuda())
+        # loss = loss_is_event + loss_event_class + loss_is_gate
 
         acc = compute_accuracy_supervised(is_event_scores, event_scores, labels)
-        accuracy.update(acc.item(), bs * 10)
+        # accuracy.update(acc.item(), bs * 10)
 
-        batch_time.update(time.time() - end_time)
-        end_time = time.time()
-        losses.update(loss.item(), bs * 10)
+        # batch_time.update(time.time() - end_time)
+        # end_time = time.time()
+        # losses.update(loss.item(), bs * 10)
 
-        '''Print logs in Terminal'''
-        if n_iter % args.print_freq == 0:
-            logger.info(
-                f'Test Epoch [{epoch}][{n_iter}/{len(test_dataloader)}]\t'
-                # f'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                # f'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
-                f'Loss {losses.val:.4f} ({losses.avg:.4f})\t'
-                f'Prec@1 {accuracy.val:.3f} ({accuracy.avg:.3f})'
-            )
+        # '''Print logs in Terminal'''
+        # if n_iter % args.print_freq == 0:
+        #     logger.info(
+        #         f'Test Epoch [{epoch}][{n_iter}/{len(test_dataloader)}]\t'
+        #         # f'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+        #         # f'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
+        #         f'Loss {losses.val:.4f} ({losses.avg:.4f})\t'
+        #         f'Prec@1 {accuracy.val:.3f} ({accuracy.avg:.3f})'
+        #     )
 
-    '''Add loss in an epoch to Tensorboard'''
-    if not eval_only:
-        writer.add_scalar('Val_epoch_data/epoch_loss', losses.avg, epoch)
-        writer.add_scalar('Val_epoch/Accuracy', accuracy.avg, epoch)
+    # '''Add loss in an epoch to Tensorboard'''
+    # if not eval_only:
+    #     writer.add_scalar('Val_epoch_data/epoch_loss', losses.avg, epoch)
+    #     writer.add_scalar('Val_epoch/Accuracy', accuracy.avg, epoch)
 
-    logger.info(
-        f'**************************************************************************\t'
-        f"\tEvaluation results (acc): {accuracy.avg:.4f}%."
-    )
-    return accuracy.avg
+    # logger.info(
+    #     f'**************************************************************************\t'
+    #     f"\tEvaluation results (acc): {accuracy.avg:.4f}%."
+    # )
+    # return accuracy.avg
 
-
+# labels:直接从batch中读到的正确标签，测试集的真值
 def compute_accuracy_supervised(is_event_scores, event_scores, labels):
     # labels = labels[:, :, :-1]  # 28 denote background
     _, targets = labels.max(-1)
+    print('targets:',targets.shape)
     # pos pred
     is_event_scores = is_event_scores.sigmoid()
     scores_pos_ind = is_event_scores > 0.5
     scores_mask = scores_pos_ind == 0
-    _, event_class = event_scores.max(-1)  # foreground classification
+    _, event_class = event_scores.max(-1)  # foreground classification，前景分类,对整个十秒的事件判定
+    print('event_scores_opt_by_model:',event_scores)
+    print('event_class:',event_class)
     pred = scores_pos_ind.long()
+    
+    
+    if(pred.shape==torch.Size([10])):
+        pred=pred.expand(1,-1)
+        scores_mask=scores_mask.expand(1,-1)
     pred *= event_class[:, None]
+    print('pred:',pred.shape)
+    print('mask:',scores_mask.shape)
     # add mask
-    pred[scores_mask] = 28  # 28 denotes bg
+    pred[scores_mask] = 28  # 28 denotes bg，概率过低的经过蒙版处理变为28，意思是背景噪声事件，pred tensor给出了模型十秒内每秒的事件预测
+    print('pred:',pred.shape)
     correct = pred.eq(targets)
     correct_num = correct.sum().double()
     acc = correct_num * (100. / correct.numel())
@@ -308,4 +330,5 @@ def save_checkpoint(state_dict, top1, task, epoch):
 
 
 if __name__ == '__main__':
+    print(sys.argv)
     main()
